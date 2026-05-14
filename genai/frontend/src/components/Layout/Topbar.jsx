@@ -3,12 +3,6 @@ import { useApp } from '../../context/AppContext'
 import { loadRepo, repoProgressStream } from '../../services/api'
 import { GitBranch, Loader, CheckCircle, AlertCircle } from 'lucide-react'
 
-/**
- * FIX: On successful repo load, reset catalog + lineage state so the UI
- * doesn't show stale data from the previous repo.
- * Previously setCatalogTables([]) was never called here, so switching repos
- * kept the old table list visible until the user manually refreshed.
- */
 export default function Topbar() {
   const {
     setRepoLoaded, setRepoInfo, notify,
@@ -38,17 +32,23 @@ export default function Topbar() {
       evtSource.close()
       setProgress({ pct: 100, stage: 'done', message: 'Ingestion complete!', done: true })
 
-      // ── FIX: wipe all stale frontend state from the previous repo ──
       setCatalogTables([])
-      setCatalogLoading(true)   // forces CatalogPage to re-fetch on next visit
+      setCatalogLoading(true)
       setExpandedTables({})
       setCheckResults({})
-      // ──────────────────────────────────────────────────────────────
 
       setRepoInfo(res.data)
       setRepoLoaded(true)
       setStatus('ok')
-      notify(`Repo loaded: ${res.data.files_processed} files · ${res.data.chunks_indexed} chunks`, 'success')
+
+      // ── Build notification with DAG count if found ──
+      const dagPart = res.data.dags_found > 0
+        ? ` · ${res.data.dags_found} Airflow DAG${res.data.dags_found !== 1 ? 's' : ''}`
+        : ''
+      notify(
+        `Repo loaded: ${res.data.files_processed} files · ${res.data.chunks_indexed} chunks${dagPart}`,
+        'success'
+      )
     } catch (e) {
       evtSource.close()
       setStatus('error')

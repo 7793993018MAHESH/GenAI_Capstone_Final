@@ -25,9 +25,7 @@ SQL_KEYWORDS = {
     "KEY","UNIQUE","DEFAULT","CHECK","REFERENCES","INTERVAL","EPOCH","SECOND",
     "MINUTE","HOUR","DAY","MONTH","YEAR","SORTKEY","DISTKEY","ENCODE",
     "DISTSTYLE","COMPOUND","INTERLEAVED","NEXTVAL","CURRVAL","NOW","CURRENT",
-    # Common column names that appear in FROM clauses by accident
     "START_TIME","END_TIME","CREATED_AT","UPDATED_AT","EVENT","EVENTS","LOG",
-    # Python/import keywords that bleed through raw-file regex (now unused but kept for safety)
     "TYPING","OS","SYS","RE","JSON","MATH","TIME","DATETIME","RANDOM",
 }
 
@@ -58,6 +56,19 @@ def _init_db():
         PRIMARY KEY (source, target))""")
     c.execute("""CREATE TABLE IF NOT EXISTS repo_state (
         key TEXT PRIMARY KEY, value TEXT)""")
+    # dag_registry is owned by health_service but we ensure it exists here too
+    c.execute("""CREATE TABLE IF NOT EXISTS dag_registry (
+        dag_id          TEXT PRIMARY KEY,
+        schedule        TEXT,
+        tasks           TEXT,
+        owners          TEXT,
+        tags            TEXT,
+        source_file     TEXT,
+        description     TEXT,
+        catchup         INTEGER DEFAULT 0,
+        max_active_runs INTEGER DEFAULT 1,
+        discovered_at   TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
     conn.commit(); conn.close()
 
 _init_db()
@@ -131,7 +142,6 @@ def _parse_columns(body: str) -> Tuple[List[str], List[Dict]]:
 # ── Lineage: explicit INSERT INTO ... SELECT ... FROM ─────────────────────────
 def _extract_insert_lineage(sql: str, file_path: str) -> List[Dict]:
     edges = []
-    # Split on INSERT INTO boundaries to avoid cross-contamination between statements
     insert_blocks = re.split(r'(?=INSERT\s+(?:OR\s+\w+\s+)?INTO\s)', sql, flags=re.IGNORECASE)
     for block in insert_blocks:
         m = re.match(r'INSERT\s+(?:OR\s+\w+\s+)?INTO\s+(?:\w+\.)?(\w+)\b(.*)', block, re.IGNORECASE | re.DOTALL)
@@ -140,7 +150,6 @@ def _extract_insert_lineage(sql: str, file_path: str) -> List[Dict]:
         target, seg = m.group(1), m.group(2)
         if not _is_valid_table_name(target):
             continue
-        # Only look inside the SELECT portion (stop before next DDL)
         select_match = re.search(r'\bSELECT\b(.*?)(?:;|$)', seg, re.IGNORECASE | re.DOTALL)
         search_seg = select_match.group(0) if select_match else seg
         for src in re.findall(r'(?:FROM|JOIN)\s+(?:\w+\.)?(\w+)', search_seg, re.IGNORECASE):
@@ -219,16 +228,6 @@ def _extract_sql_tables(sql_content: str, file_path: str) -> Tuple[Dict, List[Di
 
 # ── .py file parser ───────────────────────────────────────────────────────────
 def _extract_python_tables(content: str, file_path: str) -> Tuple[Dict, List[Dict]]:
-    """
-    Pass 1: extract SQL from triple-quoted strings → run full SQL parser.
-    Pass 2: Airflow variable-name lineage (SELECT-only strings).
-
-    FIX: Removed Pass 3 (bare FROM/JOIN/INTO regex on the raw Python file).
-    That pass was the source of junk tables — it matched Python import
-    statements, variable names, and non-SQL patterns like
-    `from typing import`, `from config import TABLE_NAME`, etc.
-    Tables are only added when they appear inside an actual SQL string.
-    """
     tables = {}
     all_edges = []
 
@@ -247,15 +246,70 @@ def _extract_python_tables(content: str, file_path: str) -> Tuple[Dict, List[Dic
     return tables, all_edges
 
 
+# ── NEW: DAG registry writer ──────────────────────────────────────────────────
+
+def _persist_dags_to_registry(dags: List[Dict], conn: sqlite3.Connection) -> int:
+    """
+    Write DAG metadata into dag_registry. Returns count of DAGs saved.
+    Called inside clone_and_parse() after all files are processed.
+    """
+    if not dags:
+        return 0
+    c = conn.cursor()
+    # Wipe old registry entries so re-loading a repo starts fresh
+    c.execute("DELETE FROM dag_registry")
+    for d in dags:
+        c.execute(
+            """INSERT OR REPLACE INTO dag_registry
+               (dag_id, schedule, tasks, owners, tags, source_file, description, catchup, max_active_runs)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                d["dag_id"],
+                d.get("schedule", ""),
+                json.dumps(d.get("tasks", [])),
+                json.dumps(d.get("owners", [])),
+                json.dumps(d.get("tags", [])),
+                d.get("source_file", ""),
+                d.get("description", ""),
+                1 if d.get("catchup") else 0,
+                int(d.get("max_active_runs") or 1),
+            )
+        )
+    return len(dags)
+
+
 # ── Main clone-and-parse pipeline ─────────────────────────────────────────────
 def clone_and_parse(repo_url: str, branch: str = "main") -> Dict:
     from app.services.progress_service import set_progress
+    # Import DAG parser — in same package
+    try:
+        from app.services.dag_parser import parse_dag_file, is_dag_file
+        dag_parser_available = True
+    except ImportError:
+        try:
+            # Fallback: try importing from the tools directory
+            import sys, importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "dag_parser",
+                os.path.join(os.path.dirname(__file__), "dag_parser.py")
+            )
+            dp_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(dp_module)
+            parse_dag_file = dp_module.parse_dag_file
+            is_dag_file    = dp_module.is_dag_file
+            dag_parser_available = True
+        except Exception as e:
+            print(f"[REPO] dag_parser not found: {e} — DAG ingestion disabled", flush=True)
+            dag_parser_available = False
+            parse_dag_file = None
+            is_dag_file    = None
 
     print(f"\n[CLONE] Thread started: {repo_url}  branch={branch}", flush=True)
     tmpdir = tempfile.mkdtemp()
     all_chunks:  List[Dict] = []
     all_tables:  Dict       = {}
     all_lineage: List[Dict] = []
+    all_dags:    List[Dict] = []   # ← NEW: collected DAG metadata
 
     # Clone
     set_progress("cloning", 0, 1, f"Cloning {repo_url} (branch: {branch})")
@@ -295,18 +349,32 @@ def clone_and_parse(repo_url: str, branch: str = "main") -> Dict:
             if not content.strip(): continue
             file_count += 1
             all_chunks.extend(_chunk_code(content, rel))
-            if   ext == ".sql": t, e = _extract_sql_tables(content, rel)
-            elif ext == ".py":  t, e = _extract_python_tables(content, rel)
-            else:               t, e = {}, []
 
-            # Smart merge: only keep richer entries (more columns = better source)
-            # FIX: also never add a zero-column table that came from a bare reference
-            # (those are gone now, but this guard stays for safety)
+            if ext == ".sql":
+                t, e = _extract_sql_tables(content, rel)
+            elif ext == ".py":
+                t, e = _extract_python_tables(content, rel)
+                # ── NEW: DAG detection for .py files ──────────────────────
+                if dag_parser_available and is_dag_file(content):
+                    try:
+                        found_dags = parse_dag_file(content, rel)
+                        if found_dags:
+                            all_dags.extend(found_dags)
+                            print(
+                                f"[REPO] DAG file: {rel} → "
+                                f"{[d['dag_id'] for d in found_dags]}",
+                                flush=True
+                            )
+                    except Exception as dag_err:
+                        print(f"[REPO] DAG parse error {rel}: {dag_err}", flush=True)
+                # ──────────────────────────────────────────────────────────
+            else:
+                t, e = {}, []
+
             for tname, tdata in t.items():
                 existing = all_tables.get(tname)
                 new_has_cols = len(tdata["columns"]) > 0
                 if not existing:
-                    # Only add if it has real column data OR it came from CREATE TABLE
                     if new_has_cols:
                         all_tables[tname] = tdata
                 elif len(tdata["columns"]) > len(existing["columns"]):
@@ -318,7 +386,7 @@ def clone_and_parse(repo_url: str, branch: str = "main") -> Dict:
 
     shutil.rmtree(tmpdir, ignore_errors=True)
 
-    # Post-process: fuzzy-match lineage targets, deduplicate edges
+    # Post-process lineage
     resolved_lineage = []
     seen_edges = set()
     for e in all_lineage:
@@ -330,7 +398,7 @@ def clone_and_parse(repo_url: str, branch: str = "main") -> Dict:
         seen_edges.add(k)
         resolved_lineage.append({**e, "source": src, "target": tgt})
 
-    # Persist — FIX: always wipe both SQLite AND ChromaDB before saving new data
+    # Persist everything in one connection
     set_progress("saving", 0, 1, "Saving to database...")
     conn = sqlite3.connect(STATE_DB)
     c = conn.cursor()
@@ -347,10 +415,26 @@ def clone_and_parse(repo_url: str, branch: str = "main") -> Dict:
             (edge["source"], edge["target"], edge["transformation"], edge["file"]),
         )
     c.execute("INSERT OR REPLACE INTO repo_state (key,value) VALUES ('last_repo',?)", (repo_url,))
-    conn.commit(); conn.close()
+
+    # ── NEW: write DAG registry and sync health ────────────────────────────
+    dag_count = _persist_dags_to_registry(all_dags, conn)
+    conn.commit()
+    conn.close()
+
+    if dag_count > 0:
+        try:
+            from app.services.health_service import sync_dags_from_registry
+            sync_dags_from_registry()
+            print(f"[REPO] {dag_count} Airflow DAG(s) written to health dashboard.", flush=True)
+        except Exception as he:
+            print(f"[REPO] health sync error: {he}", flush=True)
+    else:
+        print("[REPO] No Airflow DAGs found — health dashboard keeps existing data.", flush=True)
+    # ──────────────────────────────────────────────────────────────────────
 
     summary = (f"{file_count} files · {len(all_chunks)} chunks · "
-               f"{len(all_tables)} tables · {len(resolved_lineage)} lineage edges")
+               f"{len(all_tables)} tables · {len(resolved_lineage)} lineage edges · "
+               f"{dag_count} DAGs")
     set_progress("done", total, total, summary, done=True)
     print(f"\n[REPO] Done: {summary}", flush=True)
 
@@ -359,6 +443,7 @@ def clone_and_parse(repo_url: str, branch: str = "main") -> Dict:
         "chunks_indexed":  len(all_chunks),
         "tables_found":    len(all_tables),
         "lineage_edges":   len(resolved_lineage),
+        "dags_found":      dag_count,           # ← new field surfaced to frontend
         "chunks":          all_chunks,
     }
 
@@ -381,15 +466,11 @@ def get_lineage() -> Dict:
 
     edge_list = [{"source": e[0],"target": e[1],"transformation": e[2],"file": e[3]} for e in edges]
 
-    # FIX: Only include nodes that actually participate in at least one edge,
-    # PLUS tables that have real column data (genuinely discovered tables).
-    # This removes isolated phantom nodes from cluttering the lineage graph.
     connected_nodes = set()
     for e in edge_list:
         connected_nodes.add(e["source"])
         connected_nodes.add(e["target"])
 
-    # Also include tables with columns even if not in lineage (they're real)
     conn2 = sqlite3.connect(STATE_DB)
     rich_tables = set(
         row[0] for row in conn2.execute(
