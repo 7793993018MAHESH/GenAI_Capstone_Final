@@ -1,126 +1,101 @@
-````markdown
 # 🚀 GenAI Data Engineering Assistant
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/Platane/snk/output/github-contribution-grid-snake.svg" width="100%" />
-</p>
+AI-powered assistant for Data Engineering workflows using **RAG**, **Ollama**, **FastAPI**, and **React**.
 
-<h3 align="center">
-AI-Powered Data Engineering Assistant using RAG, Ollama & Modern UI
-</h3>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge&logo=python"/>
-  <img src="https://img.shields.io/badge/FastAPI-Backend-green?style=for-the-badge&logo=fastapi"/>
-  <img src="https://img.shields.io/badge/React-Frontend-blue?style=for-the-badge&logo=react"/>
-  <img src="https://img.shields.io/badge/Ollama-LLM-orange?style=for-the-badge"/>
-  <img src="https://img.shields.io/badge/RAG-AI-red?style=for-the-badge"/>
-  <img src="https://img.shields.io/badge/ChromaDB-VectorDB-purple?style=for-the-badge"/>
-</p>
+This platform helps data engineers instantly understand pipelines, DAGs, SQL queries, metadata, lineage, and system health through a conversational AI interface — eliminating the need to constantly switch between GitHub, Airflow, SQL editors, monitoring dashboards, and documentation tools.
 
 ---
 
-# ✨ Overview
+# ✨ Project Overview
 
-GenAI Data Engineering Assistant is an intelligent AI-powered platform designed to help data engineers instantly understand pipelines, SQL workflows, DAGs, lineage, metadata, and system health through a conversational interface.
+Modern data engineering teams work in fragmented environments where understanding a pipeline often requires navigating multiple platforms simultaneously.
 
-Instead of constantly switching between GitHub repositories, Airflow dashboards, SQL editors, monitoring tools, and documentation, engineers can ask natural language questions and receive contextual AI-driven answers instantly.
+This project solves that problem by providing a centralized AI-powered assistant capable of:
+
+- Understanding Airflow DAGs
+- Explaining SQL queries
+- Tracking table lineage
+- Extracting metadata
+- Monitoring pipeline health
+- Answering engineering questions using RAG
+
+The assistant combines semantic search, vector databases, and local LLM inference to deliver contextual and intelligent responses.
 
 ---
 
-# 🔥 Features
+# 🔥 Core Features
 
 ## 🧠 AI-Powered RAG Chatbot
 
 - Retrieval-Augmented Generation (RAG)
+- Context-aware responses
 - Semantic document search
-- Context-aware AI responses
-- LLM-powered intelligent assistance
+- Local LLM inference using Ollama
+- Intelligent query understanding
 
 ---
 
-## 📊 Pipeline Intelligence
+## 📊 Pipeline & Metadata Intelligence
 
 - DAG metadata extraction
-- Pipeline dependency mapping
-- SQL understanding
+- Airflow workflow parsing
 - Table lineage analysis
-- Ownership tracking
+- Pipeline dependency tracking
+- Ownership & metadata discovery
 
 ---
 
-## ⚡ Real-Time Insights
+## ⚡ Monitoring & Observability
 
-- Data quality checks
-- Health monitoring
-- Pipeline status visibility
-- SLO monitoring
+- Data quality monitoring
+- Pipeline health visibility
+- SLO tracking
 - Error diagnostics
+- Operational insights
 
 ---
 
-## 🎨 Modern UI/UX
+## 🎨 Modern User Interface
 
-- ChatGPT-style interface
-- Beautiful dark theme
+- ChatGPT-style conversational UI
 - Interactive dashboard
-- Real-time chat experience
-- Smooth animations
+- Real-time response streaming
+- Responsive dark-themed interface
+- Smooth user experience
 
 ---
 
 # 🏗️ System Architecture
 
-```text
-                ┌──────────────────────┐
-                │    React Frontend    │
-                └──────────┬───────────┘
-                           │
-                    REST / WebSocket
-                           │
-                ┌──────────▼───────────┐
-                │    FastAPI Backend   │
-                └──────────┬───────────┘
-                           │
-        ┌──────────────────┼──────────────────┐
-        │                  │                  │
- ┌──────▼──────┐   ┌──────▼──────┐   ┌──────▼──────┐
- │ Vector DB   │   │ Ollama LLM  │   │ DAG Parser  │
- │ ChromaDB    │   │ Llama/Qwen  │   │ Metadata    │
- └─────────────┘   └─────────────┘   └─────────────┘
-````
+```mermaid
+flowchart TB
+
+    A[🎨 React Frontend] -->|REST API / WebSocket| B[⚡ FastAPI Backend]
+
+    B --> C[🧠 Ollama LLM]
+    B --> D[📦 ChromaDB]
+    B --> E[📊 DAG Parser]
+    B --> F[📑 Metadata Engine]
+
+    C --> G[💬 AI Responses]
+    D --> G
+    E --> G
+    F --> G
+```
 
 ---
 
-# 🖼️ UI Preview
+# ⚙️ Tech Stack
 
-## 💬 AI Chat Interface
-
-<p align="center">
-  <img src="https://images.unsplash.com/photo-1677442136019-21780ecad995?q=80&w=1600&auto=format&fit=crop" width="90%" />
-</p>
-
----
-
-## 📊 Monitoring Dashboard
-
-<p align="center">
-  <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=1600&auto=format&fit=crop" width="90%" />
-</p>
-
----
-
-# 🛠️ Tech Stack
-
-| Category        | Technologies                 |
-| --------------- | ---------------------------- |
-| Frontend        | React, TailwindCSS           |
-| Backend         | FastAPI, Python              |
-| AI/LLM          | Ollama, Llama3, Qwen         |
-| Vector Database | ChromaDB                     |
-| Parsing         | AST, DAG Metadata Extraction |
-| Deployment      | Docker, GitHub               |
-| Database        | SQLite/PostgreSQL            |
+| Layer | Technologies |
+|---|---|
+| Frontend | React, TailwindCSS |
+| Backend | FastAPI, Python |
+| AI/LLM | Ollama, Llama3, Qwen |
+| Vector Database | ChromaDB |
+| Parsing | AST, DAG Metadata Extraction |
+| Database | SQLite / PostgreSQL |
+| Deployment | Docker, GitHub |
 
 ---
 
@@ -174,11 +149,17 @@ cd GenAI_Capstone_Final
 cd backend
 
 python -m venv .venv
+```
 
+### Activate Virtual Environment
+
+#### Mac/Linux
+
+```bash
 source .venv/bin/activate
 ```
 
-### Windows
+#### Windows
 
 ```bash
 .venv\Scripts\activate
@@ -216,7 +197,7 @@ npm run dev
 ollama serve
 ```
 
-### Pull Model
+### Pull LLM Model
 
 ```bash
 ollama run llama3
@@ -246,70 +227,52 @@ ollama run qwen2.5:14b
 
 # 🚀 Future Enhancements
 
-* Multi-agent AI workflows
-* Live Airflow integration
-* Snowflake metadata integration
-* Slack/Teams integration
-* Voice-enabled assistant
-* Real-time observability
-* MCP architecture support
+- Multi-agent AI workflows
+- Live Airflow integration
+- Snowflake metadata integration
+- Slack / Teams integration
+- Voice-enabled assistant
+- Real-time observability
+- MCP architecture support
 
 ---
 
 # 📈 Why This Project?
 
-Modern data engineering teams work across fragmented tools like:
+Data engineers often spend significant time switching between tools to understand pipelines, metadata, lineage, and failures.
 
-* GitHub
-* Airflow
-* SQL Editors
-* Documentation Platforms
-* Monitoring Dashboards
+This project centralizes all those workflows into a single AI-powered assistant that improves:
 
-This project centralizes everything into one AI-powered assistant that improves:
-
-✅ Productivity
-✅ Incident response
-✅ Pipeline visibility
-✅ Developer experience
+✅ Productivity  
+✅ Incident response  
+✅ Pipeline visibility  
+✅ Developer experience  
+✅ Faster debugging & analysis  
 
 ---
 
 # 👨‍💻 Author
 
-## Mahesh
+### Mahesh
 
-AI & Data Engineering Enthusiast
+AI & Data Engineering Enthusiast  
 Building intelligent developer tools using GenAI
 
-### 🔗 Connect
-
-* GitHub:
-  [https://github.com/7793993018MAHESH](https://github.com/7793993018MAHESH)
+🔗 GitHub:  
+https://github.com/7793993018MAHESH
 
 ---
 
-# ⭐ Support The Project
+# ⭐ Support
 
 If you found this project useful:
 
-```text
-⭐ Star the repository
-
-🍴 Fork the project
-
-🛠️ Contribute improvements
-```
+- ⭐ Star the repository
+- 🍴 Fork the project
+- 🛠️ Contribute improvements
 
 ---
 
 # 📜 License
 
 This project is licensed under the MIT License.
-
----
-
-<p align="center">
-  Made with ❤️ using GenAI, FastAPI, React & Ollama
-</p>
-```
